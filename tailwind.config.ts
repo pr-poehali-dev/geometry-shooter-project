@@ -18,6 +18,10 @@ export default {
 			}
 		},
 		extend: {
+			fontFamily: {
+				pixel: ['"Press Start 2P"', 'monospace'],
+				mono2: ['VT323', 'monospace'],
+			},
 			colors: {
 				border: 'hsl(var(--border))',
 				input: 'hsl(var(--input))',
@@ -84,11 +88,29 @@ export default {
 					to: {
 						height: '0'
 					}
+				},
+				'flicker': {
+					'0%, 100%': { opacity: '1' },
+					'92%': { opacity: '1' },
+					'93%': { opacity: '0.6' },
+					'94%': { opacity: '1' },
+					'97%': { opacity: '0.8' }
+				},
+				'float-slow': {
+					'0%, 100%': { transform: 'translateY(0)' },
+					'50%': { transform: 'translateY(-12px)' }
+				},
+				'scanline': {
+					'0%': { transform: 'translateY(-100%)' },
+					'100%': { transform: 'translateY(100%)' }
 				}
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+				'flicker': 'flicker 3s linear infinite',
+				'float-slow': 'float-slow 4s ease-in-out infinite',
+				'scanline': 'scanline 8s linear infinite'
 			}
 		}
 	},

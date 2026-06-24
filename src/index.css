@@ -99,3 +99,64 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .pixelated {
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+  .neon-cyan {
+    text-shadow:
+      0 0 4px #22e3ff,
+      0 0 12px #22e3ff,
+      0 0 24px #0aa6d6;
+  }
+  .neon-pink {
+    text-shadow:
+      0 0 4px #ff3df2,
+      0 0 12px #ff3df2,
+      0 0 24px #c411b8;
+  }
+  .neon-green {
+    text-shadow:
+      0 0 4px #51ff7a,
+      0 0 12px #51ff7a,
+      0 0 22px #18b94a;
+  }
+  .neon-yellow {
+    text-shadow:
+      0 0 4px #ffe14d,
+      0 0 12px #ffd000;
+  }
+  .box-neon-cyan {
+    box-shadow:
+      0 0 6px #22e3ff,
+      inset 0 0 6px #22e3ff;
+  }
+  .box-neon-pink {
+    box-shadow:
+      0 0 6px #ff3df2,
+      inset 0 0 6px #ff3df2;
+  }
+  .crt::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.18) 0px,
+      rgba(0, 0, 0, 0.18) 1px,
+      transparent 2px,
+      transparent 4px
+    );
+    z-index: 50;
+  }
+  .arcade-grid {
+    background-image:
+      linear-gradient(rgba(34, 227, 255, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34, 227, 255, 0.08) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}
