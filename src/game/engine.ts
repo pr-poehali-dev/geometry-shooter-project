@@ -25,7 +25,11 @@ export type GameStatus = 'playing' | 'won' | 'lost';
 type Vec = { x: number; y: number };
 
 type Bullet = Vec & { vx: number; vy: number; from: 'player' | 'enemy'; r: number; dmg: number };
-type Drone = Vec & { vx: number; vy: number; hp: number; r: number; t: number; shootT: number };
+type DroneKind = 'uzi' | 'n';
+type Drone = Vec & {
+  vx: number; vy: number; hp: number; maxHp: number; r: number; t: number; shootT: number;
+  kind: DroneKind; onGround: boolean; walk: number;
+};
 type Bonus = Vec & { type: 'health' | 'rapid' | 'shield'; t: number };
 type Particle = Vec & { vx: number; vy: number; life: number; max: number; color: string };
 
@@ -40,6 +44,9 @@ export type HudState = {
   status: GameStatus;
   fps: number;
   buff: string;
+  underground: boolean;
+  canDescend: boolean;
+  laserCharge: number;
 };
 
 const W = 900;
@@ -87,7 +94,18 @@ export class Game {
   spawnT = 0;
   spawnedThisWave = 0;
   bossActive = false;
-  boss: (Vec & { hp: number; max: number; vx: number; vy: number; shootT: number; phase: number }) | null = null;
+  boss:
+    | (Vec & {
+        hp: number; max: number; vx: number; vy: number; shootT: number; phase: number;
+        hits: number; laserState: 'idle' | 'charging' | 'firing'; laserT: number; laserY: number;
+      })
+    | null = null;
+
+  // underground / descent
+  underground = false;
+  canDescend = false;
+  descendT = 0;
+  laserCharge = 0;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -169,6 +187,9 @@ export class Game {
       status: 'playing',
       fps: Math.round(this.fps),
       buff: this.rapid > 0 ? 'RAPID' : this.shield > 0 ? 'SHIELD' : '',
+      underground: this.underground,
+      canDescend: this.canDescend,
+      laserCharge: this.laserCharge,
     });
   }
 
@@ -196,17 +217,38 @@ export class Game {
 
   spawnDrone() {
     const side = Math.random() > 0.5 ? 1 : -1;
+    const kind: DroneKind = Math.random() > 0.5 ? 'uzi' : 'n';
+    const hp = kind === 'uzi' ? 14 : 12;
     this.drones.push({
       x: side > 0 ? W + 30 : -30,
-      y: 80 + Math.random() * (GROUND - 180),
-      vx: -side * (1.4 + Math.random() * 1.2) * this.diffMul,
-      vy: 0, hp: 12, r: 18, t: Math.random() * 6.28, shootT: 40 + Math.random() * 60,
+      y: GROUND - 26,
+      vx: -side * (1.1 + Math.random() * 0.9) * this.diffMul,
+      vy: 0, hp, maxHp: hp, r: 18, t: Math.random() * 6.28,
+      shootT: 50 + Math.random() * 70, kind, onGround: true, walk: Math.random() * 6.28,
     });
   }
 
   startBoss() {
     this.bossActive = true;
-    this.boss = { x: W - 140, y: 140, hp: 100, max: 100, vx: 0, vy: 1.4, shootT: 50, phase: 0 };
+    const baseY = this.underground ? GROUND - 220 : 140;
+    this.boss = {
+      x: W - 150, y: baseY, hp: 100, max: 100, vx: 0, vy: 1.4, shootT: 50, phase: 0,
+      hits: 0, laserState: 'idle', laserT: 0, laserY: baseY,
+    };
+  }
+
+  descend() {
+    if (this.underground) return;
+    this.underground = true;
+    this.canDescend = false;
+    this.spawnedThisWave = 0;
+    this.spawnT = 30;
+    this.wave = 4;
+    this.drones = [];
+    this.bullets = [];
+    this.px = 120;
+    this.py = GROUND - this.ph / 2;
+    this.spawnParticles(this.px, this.py, 24, '#9b6bff');
   }
 
   update(dt: number) {
@@ -234,56 +276,114 @@ export class Game {
 
     // spawn waves
     if (!this.bossActive) {
-      this.spawnT -= dt;
-      const perWave = 6 + this.wave * 2;
-      if (this.spawnT <= 0 && this.spawnedThisWave < perWave) {
-        this.spawnDrone();
-        this.spawnedThisWave++;
-        this.spawnT = Math.max(20, 70 - this.wave * 5) / this.diffMul;
-      }
-      if (this.spawnedThisWave >= perWave && this.drones.length === 0) {
-        if (this.wave >= 3) {
+      if (!this.underground) {
+        // surface: 3 waves, then open descent
+        this.spawnT -= dt;
+        const perWave = 6 + this.wave * 2;
+        if (!this.canDescend && this.spawnT <= 0 && this.spawnedThisWave < perWave) {
+          this.spawnDrone();
+          this.spawnedThisWave++;
+          this.spawnT = Math.max(20, 70 - this.wave * 5) / this.diffMul;
+        }
+        if (!this.canDescend && this.spawnedThisWave >= perWave && this.drones.length === 0) {
+          if (this.wave >= 3) {
+            this.canDescend = true;
+          } else {
+            this.wave++;
+            this.spawnedThisWave = 0;
+          }
+        }
+        // descend when player reaches the hatch (right side) holding down
+        if (this.canDescend && this.px > W - 90 &&
+            (this.keys['ArrowDown'] || this.keys['KeyS'])) {
+          this.descend();
+        }
+      } else {
+        // underground: short guard wave, then boss
+        this.spawnT -= dt;
+        if (this.spawnedThisWave < 4 && this.spawnT <= 0) {
+          this.spawnDrone();
+          this.spawnedThisWave++;
+          this.spawnT = 50 / this.diffMul;
+        }
+        if (this.spawnedThisWave >= 4 && this.drones.length === 0) {
           this.startBoss();
-        } else {
-          this.wave++;
-          this.spawnedThisWave = 0;
         }
       }
     }
 
-    // drones
+    // drones (ground walkers)
     for (const d of this.drones) {
       d.t += 0.05 * dt;
+      d.walk += Math.abs(d.vx) * 0.25 * dt;
+      // walk toward player
+      const dir = this.px < d.x ? -1 : 1;
+      const sp = (d.kind === 'uzi' ? 1.5 : 1.1) * this.diffMul;
+      d.vx = dir * sp;
       d.x += d.vx * dt;
-      d.y += Math.sin(d.t) * 1.4 * dt;
+      // gravity to ground
+      d.vy += 0.7 * dt;
+      d.y += d.vy * dt;
+      if (d.y >= GROUND - 26) { d.y = GROUND - 26; d.vy = 0; d.onGround = true; }
+      // occasional hop
+      if (d.onGround && Math.random() < 0.01 * dt) { d.vy = -8; d.onGround = false; }
       d.shootT -= dt;
       if (d.shootT <= 0) {
-        d.shootT = (90 + Math.random() * 60) / this.diffMul;
         const ang = Math.atan2(this.py - d.y, this.px - d.x);
-        this.bullets.push({ x: d.x, y: d.y, vx: Math.cos(ang) * 4.5, vy: Math.sin(ang) * 4.5, from: 'enemy', r: 5, dmg: 8 });
+        if (d.kind === 'uzi') {
+          // Uzi: rapid burst
+          d.shootT = (55 + Math.random() * 30) / this.diffMul;
+          this.bullets.push({ x: d.x, y: d.y - 6, vx: Math.cos(ang) * 6, vy: Math.sin(ang) * 6, from: 'enemy', r: 4, dmg: 5 });
+        } else {
+          // N: stronger single shot
+          d.shootT = (95 + Math.random() * 50) / this.diffMul;
+          this.bullets.push({ x: d.x, y: d.y - 6, vx: Math.cos(ang) * 4.5, vy: Math.sin(ang) * 4.5, from: 'enemy', r: 6, dmg: 9 });
+        }
       }
-      if (d.x < -60 || d.x > W + 60) d.vx *= -1;
+      if (d.x < 18) d.x = 18;
+      if (d.x > W - 18) d.x = W - 18;
     }
 
     // boss
     if (this.boss) {
       const b = this.boss;
+      const topY = this.underground ? GROUND - 300 : 100;
+      const botY = GROUND - 160;
       b.y += b.vy * dt;
-      if (b.y < 100 || b.y > GROUND - 160) b.vy *= -1;
-      b.shootT -= dt;
-      if (b.shootT <= 0) {
-        b.phase++;
-        b.shootT = 45 / this.diffMul;
-        if (b.phase % 3 === 0) {
-          for (let a = 0; a < 8; a++) {
-            const ang = (a / 8) * Math.PI * 2;
-            this.bullets.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 3.5, vy: Math.sin(ang) * 3.5, from: 'enemy', r: 6, dmg: 10 });
+      if (b.y < topY || b.y > botY) b.vy *= -1;
+
+      if (b.laserState === 'charging') {
+        // freeze and lock the laser height to player's row
+        b.laserT -= dt;
+        b.laserY = b.laserY * 0.9 + this.py * 0.1;
+        if (b.laserT <= 0) { b.laserState = 'firing'; b.laserT = 60; }
+      } else if (b.laserState === 'firing') {
+        b.laserT -= dt;
+        // damage if player crosses the beam line (left of boss)
+        if (this.shield <= 0 && this.px < b.x - 40 && Math.abs(this.py - b.laserY) < this.ph / 2 + 14) {
+          this.hp -= 0.9 * dt;
+          this.spawnParticles(this.px, this.py, 2, '#ff3df2');
+        }
+        if (b.laserT <= 0) { b.laserState = 'idle'; b.hits = 0; }
+      } else {
+        b.shootT -= dt;
+        if (b.shootT <= 0) {
+          b.phase++;
+          b.shootT = 45 / this.diffMul;
+          if (b.phase % 3 === 0) {
+            for (let a = 0; a < 8; a++) {
+              const ang = (a / 8) * Math.PI * 2;
+              this.bullets.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 3.5, vy: Math.sin(ang) * 3.5, from: 'enemy', r: 6, dmg: 10 });
+            }
+          } else {
+            const ang = Math.atan2(this.py - b.y, this.px - b.x);
+            this.bullets.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 5.5, vy: Math.sin(ang) * 5.5, from: 'enemy', r: 7, dmg: 12 });
           }
-        } else {
-          const ang = Math.atan2(this.py - b.y, this.px - b.x);
-          this.bullets.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 5.5, vy: Math.sin(ang) * 5.5, from: 'enemy', r: 7, dmg: 12 });
         }
       }
+      this.laserCharge = b.hits;
+    } else {
+      this.laserCharge = 0;
     }
 
     // bullets
@@ -306,6 +406,15 @@ export class Game {
         this.boss.hp -= bl.dmg;
         bl.x = -9999;
         this.spawnParticles(bl.x, bl.y, 6, '#ff3df2');
+        if (this.boss.laserState === 'idle') {
+          this.boss.hits++;
+          if (this.boss.hits >= 5) {
+            this.boss.laserState = 'charging';
+            this.boss.laserT = 70;
+            this.boss.laserY = this.py;
+            this.spawnParticles(this.boss.x, this.boss.y, 16, '#ff3df2');
+          }
+        }
       }
     }
 
@@ -400,34 +509,75 @@ export class Game {
     const c = this.ctx;
     // bg gradient
     const g = c.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, '#0a0420');
-    g.addColorStop(0.6, '#140a33');
-    g.addColorStop(1, '#1d0a3d');
+    if (this.underground) {
+      g.addColorStop(0, '#1a0a05');
+      g.addColorStop(0.6, '#2a1206');
+      g.addColorStop(1, '#0c0602');
+    } else {
+      g.addColorStop(0, '#0a0420');
+      g.addColorStop(0.6, '#140a33');
+      g.addColorStop(1, '#1d0a3d');
+    }
     c.fillStyle = g;
     c.fillRect(0, 0, W, H);
 
-    // stars
-    c.fillStyle = '#7d6bcf';
-    for (const s of this.stars) {
-      c.globalAlpha = 0.3 + (Math.sin((this.last / 600) + s.x) + 1) * 0.25;
-      c.fillRect(s.x, s.y, s.s, s.s);
+    if (this.underground) {
+      // cave rocks
+      c.fillStyle = 'rgba(120,70,30,0.25)';
+      for (const s of this.stars) {
+        c.fillRect((s.x * 1.3) % W, (s.y * 0.9) % GROUND, s.s * 3, s.s * 3);
+      }
+      // hanging stalactites
+      c.fillStyle = '#3a1c08';
+      for (let i = 0; i < 9; i++) {
+        const sx = i * 110 + 30;
+        c.beginPath();
+        c.moveTo(sx - 16, 0); c.lineTo(sx + 16, 0); c.lineTo(sx, 60 + (i % 3) * 20);
+        c.closePath(); c.fill();
+      }
+    } else {
+      // stars
+      c.fillStyle = '#7d6bcf';
+      for (const s of this.stars) {
+        c.globalAlpha = 0.3 + (Math.sin((this.last / 600) + s.x) + 1) * 0.25;
+        c.fillRect(s.x, s.y, s.s, s.s);
+      }
+      c.globalAlpha = 1;
     }
-    c.globalAlpha = 1;
+
+    // descent hatch on surface
+    if (!this.underground && this.canDescend) {
+      const hx = W - 60;
+      c.save();
+      c.shadowBlur = 18; c.shadowColor = '#9b6bff';
+      c.fillStyle = '#1a0a30';
+      c.fillRect(hx - 34, GROUND - 6, 68, 6);
+      c.fillStyle = '#9b6bff';
+      const pulse = 0.5 + Math.sin(this.last / 200) * 0.5;
+      c.globalAlpha = 0.4 + pulse * 0.5;
+      c.fillRect(hx - 30, GROUND - 4, 60, 4);
+      c.restore();
+      c.globalAlpha = 1;
+      c.fillStyle = '#cdb6ff';
+      c.font = '18px "VT323", monospace';
+      c.textAlign = 'center';
+      c.fillText('\u2193 ВНИЗ (S)', hx, GROUND - 14);
+    }
 
     // ground
-    c.fillStyle = '#0a0a18';
+    c.fillStyle = this.underground ? '#160a04' : '#0a0a18';
     c.fillRect(0, GROUND, W, H - GROUND);
-    c.strokeStyle = '#22e3ff';
+    c.strokeStyle = this.underground ? '#ff8a3a' : '#22e3ff';
     c.lineWidth = 2;
     c.shadowBlur = 12;
-    c.shadowColor = '#22e3ff';
+    c.shadowColor = this.underground ? '#ff8a3a' : '#22e3ff';
     c.beginPath();
     c.moveTo(0, GROUND);
     c.lineTo(W, GROUND);
     c.stroke();
     c.shadowBlur = 0;
     // grid floor
-    c.strokeStyle = 'rgba(34,227,255,0.15)';
+    c.strokeStyle = this.underground ? 'rgba(255,138,58,0.12)' : 'rgba(34,227,255,0.15)';
     c.lineWidth = 1;
     for (let x = (this.px % 40); x < W; x += 40) {
       c.beginPath(); c.moveTo(x, GROUND); c.lineTo(x, H); c.stroke();
@@ -454,43 +604,92 @@ export class Game {
       c.fillText(bo.type === 'health' ? '+' : bo.type === 'rapid' ? 'R' : 'S', bo.x, bo.y + 5);
     }
 
-    // drones
+    // drones — Murder Drones style (Uzi / N)
     for (const d of this.drones) {
+      const accent = d.kind === 'uzi' ? '#ff4dd2' : '#ffd000';
+      const legSwing = Math.sin(d.walk) * 5;
       c.save();
       c.translate(d.x, d.y);
-      c.shadowBlur = 10; c.shadowColor = '#ff3b3b';
-      c.fillStyle = '#2a0a0a';
-      c.fillRect(-d.r, -d.r * 0.6, d.r * 2, d.r * 1.2);
-      c.fillStyle = '#ff3b3b';
-      c.fillRect(-d.r, -2, d.r * 2, 4);
-      c.fillStyle = '#ffd000';
-      c.fillRect(-4, -4, 8, 8);
-      // propellers
-      c.fillStyle = '#888';
-      c.fillRect(-d.r - 6, -d.r * 0.6 - 4, 8, 3);
-      c.fillRect(d.r - 2, -d.r * 0.6 - 4, 8, 3);
+      // legs (walking)
+      c.strokeStyle = '#d8d8e0';
+      c.lineWidth = 3;
+      c.beginPath(); c.moveTo(-6, 14); c.lineTo(-6 + legSwing, 26); c.stroke();
+      c.beginPath(); c.moveTo(6, 14); c.lineTo(6 - legSwing, 26); c.stroke();
+      // body capsule (white)
+      c.shadowBlur = 8; c.shadowColor = accent;
+      c.fillStyle = '#f2f0f5';
+      c.fillRect(-13, -16, 26, 30);
+      c.fillStyle = '#d6d2dd';
+      c.fillRect(-13, 10, 26, 4);
+      // black face screen
+      c.shadowBlur = 0;
+      c.fillStyle = '#0a0a0f';
+      c.fillRect(-11, -13, 22, 18);
+      // eyes / symbol
+      c.fillStyle = accent;
+      c.shadowBlur = 8; c.shadowColor = accent;
+      if (d.kind === 'uzi') {
+        // X X eyes
+        c.font = 'bold 9px "VT323", monospace';
+        c.textAlign = 'center';
+        c.fillText('X', -5, -2);
+        c.fillText('X', 5, -2);
+      } else {
+        // N: two angled eyes
+        c.fillRect(-8, -8, 5, 7);
+        c.fillRect(3, -8, 5, 7);
+      }
+      // antenna / horns
+      c.shadowBlur = 0;
+      c.strokeStyle = accent; c.lineWidth = 2;
+      c.beginPath(); c.moveTo(-7, -16); c.lineTo(-10, -24); c.stroke();
+      c.beginPath(); c.moveTo(7, -16); c.lineTo(10, -24); c.stroke();
+      // little gun arm
+      c.fillStyle = '#8a8a96';
+      const gd = this.px < d.x ? -1 : 1;
+      c.fillRect(gd > 0 ? 11 : -17, 0, 6, 4);
       c.restore();
       c.shadowBlur = 0;
       // hp bar
       c.fillStyle = '#300';
-      c.fillRect(d.x - 16, d.y - d.r - 8, 32, 3);
+      c.fillRect(d.x - 16, d.y - 32, 32, 3);
       c.fillStyle = '#51ff7a';
-      c.fillRect(d.x - 16, d.y - d.r - 8, 32 * (d.hp / 12), 3);
+      c.fillRect(d.x - 16, d.y - 32, 32 * Math.max(0, d.hp / d.maxHp), 3);
     }
 
     // boss
     if (this.boss) {
       const b = this.boss;
+      // laser beam
+      if (b.laserState === 'charging') {
+        const k = 1 - b.laserT / 70;
+        c.save();
+        c.globalAlpha = 0.4 + Math.sin(this.last / 40) * 0.3;
+        c.fillStyle = '#ff3df2';
+        c.fillRect(0, b.laserY - (1 + k * 4), b.x - 40, 2 + k * 8);
+        c.restore();
+      } else if (b.laserState === 'firing') {
+        c.save();
+        c.shadowBlur = 24; c.shadowColor = '#ff3df2';
+        c.fillStyle = '#ffffff';
+        c.fillRect(0, b.laserY - 7, b.x - 40, 14);
+        c.fillStyle = '#ff3df2';
+        c.globalAlpha = 0.7;
+        c.fillRect(0, b.laserY - 14, b.x - 40, 28);
+        c.restore();
+        c.shadowBlur = 0;
+      }
       c.save();
       c.translate(b.x, b.y);
-      c.shadowBlur = 25; c.shadowColor = '#ff3df2';
+      const charging = b.laserState !== 'idle';
+      c.shadowBlur = 25; c.shadowColor = charging ? '#ffffff' : '#ff3df2';
       c.fillStyle = '#2a0030';
       c.fillRect(-52, -42, 104, 84);
-      c.fillStyle = '#ff3df2';
+      c.fillStyle = charging ? '#ffffff' : '#ff3df2';
       c.fillRect(-52, -42, 104, 8);
       c.fillRect(-52, 34, 104, 8);
-      // eyes
-      c.fillStyle = '#ffd000';
+      // eyes (glow red when charging laser)
+      c.fillStyle = charging ? '#ff2b2b' : '#ffd000';
       c.fillRect(-30, -14, 18, 18);
       c.fillRect(12, -14, 18, 18);
       c.fillStyle = '#000';

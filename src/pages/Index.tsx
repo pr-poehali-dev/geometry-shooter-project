@@ -10,7 +10,7 @@ import {
   type GameStatus,
 } from '@/game/engine';
 
-type Screen = 'menu' | 'skins' | 'settings' | 'records' | 'game' | 'gameover';
+type Screen = 'menu' | 'skins' | 'settings' | 'records' | 'intro' | 'game' | 'gameover';
 
 const PixelButton = ({
   children,
@@ -83,7 +83,7 @@ const Index = () => {
   const startGame = useCallback(() => {
     setResult(null);
     setPaused(false);
-    setScreen('game');
+    setScreen('intro');
   }, []);
 
   useEffect(() => {
@@ -137,7 +137,7 @@ const Index = () => {
     <div className="min-h-screen w-full bg-[#06030f] arcade-grid flex flex-col items-center justify-center p-4 overflow-hidden">
       <div className="relative w-full max-w-[920px]">
         {/* Title */}
-        {screen !== 'game' && (
+        {screen !== 'game' && screen !== 'intro' && (
           <div className="text-center mb-6 select-none">
             <h1 className="font-pixel text-[#22e3ff] neon-cyan text-2xl sm:text-4xl leading-tight animate-flicker">
               NEON
@@ -167,9 +167,14 @@ const Index = () => {
               РЕКОРДЫ
             </PixelButton>
             <p className="font-mono2 text-[#7d6bcf] text-base mt-4 text-center max-w-md">
-              УПРАВЛЕНИЕ: A/D — движение · SPACE — прыжок · J — стрелять · ESC — пауза
+              A/D — движение · SPACE — прыжок · S — вниз · J — стрелять · ESC — пауза
             </p>
           </div>
+        )}
+
+        {/* INTRO — командир */}
+        {screen === 'intro' && (
+          <CommanderIntro onDone={() => setScreen('game')} />
         )}
 
         {/* SKINS */}
@@ -302,27 +307,59 @@ const Index = () => {
                 {hud?.buff && <span className="text-[#ffd000]">{hud.buff}</span>}
               </div>
               <span className="text-[#51ff7a]">SCORE {hud?.score ?? 0}</span>
-              <span className="text-[#22e3ff]">
-                {hud?.bossActive ? 'BOSS!' : `WAVE ${hud?.wave ?? 1}`}
+              <span className={hud?.underground ? 'text-[#ff8a3a]' : 'text-[#22e3ff]'}>
+                {hud?.bossActive
+                  ? 'BOSS!'
+                  : hud?.underground
+                  ? 'ПОДЗЕМЕЛЬЕ'
+                  : `WAVE ${hud?.wave ?? 1}`}
               </span>
               <button onClick={togglePause} className="text-[#ff3df2] hover:scale-110 transition">
                 <Icon name="Pause" size={18} />
               </button>
             </div>
 
+            {/* Descent hint */}
+            {hud?.canDescend && !hud?.bossActive && (
+              <div className="w-full max-w-[900px] font-pixel text-[9px] text-[#9b6bff] animate-flicker text-center">
+                ↓ ПОДОЙДИ К ЛЮКУ СПРАВА И НАЖМИ S — СПУСК В ПОДЗЕМЕЛЬЕ
+              </div>
+            )}
+
             {/* Boss bar */}
             {hud?.bossActive && (
-              <div className="w-full max-w-[900px] flex items-center gap-2 font-pixel text-[9px]">
-                <span className="text-[#ff3df2] animate-flicker">BOSS</span>
-                <div className="flex-1 h-5 border-2 border-[#ff3df2] bg-black/60 box-neon-pink">
-                  <div
-                    className="h-full bg-[#ff3df2] transition-all"
-                    style={{ width: `${(hud.bossHp / hud.bossMax) * 100}%` }}
-                  />
+              <div className="w-full max-w-[900px] flex flex-col gap-1">
+                <div className="flex items-center gap-2 font-pixel text-[9px]">
+                  <span className="text-[#ff3df2] animate-flicker">BOSS</span>
+                  <div className="flex-1 h-5 border-2 border-[#ff3df2] bg-black/60 box-neon-pink">
+                    <div
+                      className="h-full bg-[#ff3df2] transition-all"
+                      style={{ width: `${(hud.bossHp / hud.bossMax) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-[#ff3df2]">
+                    {hud.bossHp}/{hud.bossMax}
+                  </span>
                 </div>
-                <span className="text-[#ff3df2]">
-                  {hud.bossHp}/{hud.bossMax}
-                </span>
+                {/* Laser charge */}
+                <div className="flex items-center gap-2 font-pixel text-[8px]">
+                  <span className="text-[#ffd000]">ЛАЗЕР</span>
+                  <div className="flex gap-1">
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <span
+                        key={i}
+                        className={`w-4 h-3 border ${
+                          (hud.laserCharge ?? 0) > i
+                            ? 'bg-[#ff2b2b] border-[#ff2b2b]'
+                            : 'border-[#5b1f2a] bg-black/40'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  {(hud.laserCharge ?? 0) >= 5 && (
+                    <span className="text-[#ff2b2b] animate-flicker">ОПАСНОСТЬ!</span>
+                  )}
+                </div>
               </div>
             )}
 
@@ -353,6 +390,7 @@ const Index = () => {
               <TouchBtn label="◀" onDown={() => gameRef.current?.key('ArrowLeft', true)} onUp={() => gameRef.current?.key('ArrowLeft', false)} />
               <TouchBtn label="▶" onDown={() => gameRef.current?.key('ArrowRight', true)} onUp={() => gameRef.current?.key('ArrowRight', false)} />
               <TouchBtn label="↑" onDown={() => gameRef.current?.jump()} onUp={() => {}} />
+              <TouchBtn label="↓" onDown={() => gameRef.current?.key('ArrowDown', true)} onUp={() => gameRef.current?.key('ArrowDown', false)} />
               <TouchBtn label="●" onDown={() => gameRef.current?.key('KeyJ', true)} onUp={() => gameRef.current?.key('KeyJ', false)} />
             </div>
           </div>
@@ -388,6 +426,81 @@ const Index = () => {
           <span style={{ color: selectedSkin.glow }}>СКИН: {selectedSkin.name}</span>
         </div>
       )}
+    </div>
+  );
+};
+
+const COMMANDER_LINES = [
+  'КОМАНДИР: На нас напали!',
+  'Дроны-убийцы атакуют сектор...',
+  'Узи и N уже близко. Будь начеку!',
+  'ПОБЕДА БУДЕТ ЗА НАМИ!',
+];
+
+const CommanderIntro = ({ onDone }: { onDone: () => void }) => {
+  const [line, setLine] = useState(0);
+  const [text, setText] = useState('');
+
+  useEffect(() => {
+    const full = COMMANDER_LINES[line];
+    let i = 0;
+    setText('');
+    const typer = setInterval(() => {
+      i++;
+      setText(full.slice(0, i));
+      if (i >= full.length) {
+        clearInterval(typer);
+        const next = setTimeout(() => {
+          if (line < COMMANDER_LINES.length - 1) setLine((l) => l + 1);
+          else onDone();
+        }, line === COMMANDER_LINES.length - 1 ? 900 : 700);
+        return () => clearTimeout(next);
+      }
+    }, 38);
+    return () => clearInterval(typer);
+  }, [line, onDone]);
+
+  const isFinal = line === COMMANDER_LINES.length - 1;
+
+  return (
+    <div className="animate-fade-in flex flex-col items-center gap-6 py-6">
+      {/* Commander avatar */}
+      <div className="relative animate-float-slow">
+        <div
+          className="w-28 h-28 border-4 border-[#22e3ff] box-neon-cyan bg-[#0a1530] flex items-center justify-center"
+          style={{ imageRendering: 'pixelated' }}
+        >
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 bg-[#3a6b8c]" />
+            <div className="absolute top-0 left-0 right-0 h-3 bg-[#1f3d52]" />
+            <div className="absolute top-5 left-2 w-3 h-3 bg-[#22e3ff]" />
+            <div className="absolute top-5 right-2 w-3 h-3 bg-[#22e3ff]" />
+            <div className="absolute bottom-3 left-4 right-4 h-2 bg-[#ffd000]" />
+          </div>
+        </div>
+        <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 font-pixel text-[8px] text-[#22e3ff] bg-black px-2 py-1 whitespace-nowrap">
+          КОМАНДИР
+        </span>
+      </div>
+
+      {/* Speech box */}
+      <div className="border-2 border-[#51ff7a] bg-black/70 px-6 py-5 max-w-md min-h-[90px] flex items-center justify-center">
+        <p
+          className={`font-mono2 text-2xl text-center ${
+            isFinal ? 'text-[#ff3df2] neon-pink' : 'text-[#51ff7a] neon-green'
+          }`}
+        >
+          {text}
+          <span className="animate-flicker">_</span>
+        </p>
+      </div>
+
+      <button
+        onClick={onDone}
+        className="font-pixel text-[10px] text-[#7d6bcf] hover:text-[#22e3ff] transition tracking-wider"
+      >
+        ПРОПУСТИТЬ ▶
+      </button>
     </div>
   );
 };
